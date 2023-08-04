@@ -96,6 +96,9 @@ export namespace Commands {
 
     export const JAVA_UPDATE_DEPRECATED_TASK = "java.updateDeprecatedTask";
 
+    // // 修改
+    // export const VIEW_PACKAGE_DELETE_CACHE = "java.view.package.deleteCache";
+    
     /**
      * Commands from Visual Studio Code
      */

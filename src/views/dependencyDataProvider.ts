@@ -22,6 +22,11 @@ import { explorerNodeCache } from "./nodeCache/explorerNodeCache";
 import { ProjectNode } from "./projectNode";
 import { WorkspaceNode } from "./workspaceNode";
 
+// 修改
+import * as fse from "fs-extra";
+import { HierarchicalPackageNodeData } from "../java/hierarchicalPackageNodeData";
+import { HierarchicalPackageNode } from "./hierarchicalPackageNode";
+
 export class DependencyDataProvider implements TreeDataProvider<ExplorerNode> {
 
     private _onDidChangeTreeData: EventEmitter<ExplorerNode | null | undefined> = new EventEmitter<ExplorerNode | null | undefined>();
@@ -38,7 +43,79 @@ export class DependencyDataProvider implements TreeDataProvider<ExplorerNode> {
      */
     private pendingRefreshElement: ExplorerNode | undefined | null;
 
+    // 修改
+    private cacheRootItems: ExplorerNode[] | undefined = undefined;
+    private cacheRootItemsHierarchicalView: ExplorerNode[] | undefined = undefined;
+    private isFirst: boolean = false;
+    private _hierarchicalPackageNodeDataMap: Map<string, HierarchicalPackageNodeData> = new Map<string, HierarchicalPackageNodeData>();
+
     constructor(public readonly context: ExtensionContext) {
+        // 修改
+        let rootItems: ExplorerNode[] = [];
+        const folders = workspace.workspaceFolders;
+        try{
+            if (folders && folders.length) {
+                if (folders.length > 1) {
+                    if(Settings.isHierarchicalView()) {
+                        folders.forEach(folder => {
+                            let cachedFile = Uri.joinPath(folder.uri, '.vscode/explorerNodeCached_HierarchicalView.json').fsPath;
+                            if(fse.pathExistsSync(cachedFile)) {
+                                let data = JSON.parse(fse.readFileSync(cachedFile, "utf-8"));
+                                let workspaceNode: INodeData = data["root"];
+                                rootItems.push(new WorkspaceNode(workspaceNode, undefined));
+                                for (let [uri, hierarchicalPackageNodeData] of Object.entries(data["hierarchicalPackageNodeDataMap"]) as any) {
+                                    this._hierarchicalPackageNodeDataMap.set(uri, hierarchicalPackageNodeData);
+                                }
+                            }
+                        });
+                    }else {
+                        folders.forEach(folder => {
+                            let cachedFile = Uri.joinPath(folder.uri, '.vscode/explorerNodeCached.json').fsPath;
+                            if(fse.pathExistsSync(cachedFile)) {
+                                let workspaceNode: INodeData = JSON.parse(fse.readFileSync(cachedFile, "utf-8"));
+                                rootItems.push(new WorkspaceNode(workspaceNode, undefined));
+                            }
+                        });
+                    }
+                } else {
+                    if(Settings.isHierarchicalView()) {
+                        let cachedFile = Uri.joinPath(folders[0].uri, '.vscode/explorerNodeCached_HierarchicalView.json').fsPath;
+                        if(fse.pathExistsSync(cachedFile)) {
+                            let data = JSON.parse(fse.readFileSync(cachedFile, "utf-8"));
+                            let projects: INodeData[] = data["root"];
+                            projects.forEach((project) => {
+                                rootItems.push(new ProjectNode(project, undefined));
+                            });
+                            for (let [uri, hierarchicalPackageNodeData] of Object.entries(data["hierarchicalPackageNodeDataMap"]) as any) {
+                                this._hierarchicalPackageNodeDataMap.set(uri, hierarchicalPackageNodeData);
+                            }
+                        }
+                    }else {
+                        let cachedFile = Uri.joinPath(folders[0].uri, '.vscode/explorerNodeCached.json').fsPath;
+                        if(fse.pathExistsSync(cachedFile)) {
+                            let projects: INodeData[] = JSON.parse(fse.readFileSync(cachedFile, "utf-8"));
+                            projects.forEach((project) => {
+                                rootItems.push(new ProjectNode(project, undefined));
+                            });   
+                        }
+                    }
+                }
+            }
+        }catch(e: any) {
+            console.log(e.message);
+            rootItems = [];
+        }
+        if(rootItems.length) {
+            if(Settings.isHierarchicalView()) {
+                this.cacheRootItemsHierarchicalView = rootItems;
+            }
+            else {
+                this.cacheRootItems = rootItems;
+            }
+            this.isFirst = true;
+        }
+
+
         // commands that do not send back telemetry
         context.subscriptions.push(commands.registerCommand(Commands.VIEW_PACKAGE_INTERNAL_REFRESH, (debounce?: boolean, element?: ExplorerNode) =>
             this.refresh(debounce, element)));
@@ -46,9 +123,61 @@ export class DependencyDataProvider implements TreeDataProvider<ExplorerNode> {
             appendOutput(terminalId, message);
         }));
 
+        // // 修改
+        // context.subscriptions.push(commands.registerCommand(Commands.VIEW_PACKAGE_DELETE_CACHE, () => {
+        //     const folders = workspace.workspaceFolders;
+        //     if (folders && folders.length) {
+        //         let fileNames = [
+        //             '.vscode/explorerNodeCached_HierarchicalView.json',
+        //             '.vscode/explorerNodeCached.json'
+        //         ];
+        //         if (folders.length > 1) {
+        //             folders.forEach(folder => {
+        //                 fileNames.forEach(fileName => {
+        //                     let cachedFile = Uri.joinPath(folder.uri, fileName).fsPath;
+        //                     if(fse.pathExistsSync(cachedFile)) fse.removeSync(cachedFile);
+        //                 })
+        //             });
+        //         } else {
+        //             fileNames.forEach(fileName => {
+        //                 let cachedFile = Uri.joinPath(folders[0].uri, fileName).fsPath;
+        //             if(fse.pathExistsSync(cachedFile)) fse.removeSync(cachedFile);
+        //             })
+        //         }
+        //     }
+        //     this.cacheRootItems = undefined;
+        //     this.cacheRootItemsHierarchicalView = undefined;
+        //     commands.executeCommand(Commands.VIEW_PACKAGE_INTERNAL_REFRESH);
+        // }));
+
         // normal commands
+        // 修改
         context.subscriptions.push(instrumentOperationAsVsCodeCommand(Commands.VIEW_PACKAGE_REFRESH, (debounce?: boolean, element?: ExplorerNode) =>
-            this.refresh(debounce, element)));
+            {
+                const folders = workspace.workspaceFolders;
+                if (folders && folders.length) {
+                    let fileNames = [
+                        '.vscode/explorerNodeCached_HierarchicalView.json',
+                        '.vscode/explorerNodeCached.json'
+                    ];
+                    if (folders.length > 1) {
+                        folders.forEach(folder => {
+                            fileNames.forEach(fileName => {
+                                let cachedFile = Uri.joinPath(folder.uri, fileName).fsPath;
+                                if(fse.pathExistsSync(cachedFile)) fse.removeSync(cachedFile);
+                            })
+                        });
+                    } else {
+                        fileNames.forEach(fileName => {
+                            let cachedFile = Uri.joinPath(folders[0].uri, fileName).fsPath;
+                        if(fse.pathExistsSync(cachedFile)) fse.removeSync(cachedFile);
+                        })
+                    }
+                }
+                this.cacheRootItems = undefined;
+                this.cacheRootItemsHierarchicalView = undefined;
+                this.refresh(debounce, element); 
+            }));
         context.subscriptions.push(instrumentOperationAsVsCodeCommand(Commands.VIEW_PACKAGE_EXPORT_JAR, async (node: INodeData) => {
             executeExportJarTask(node);
         }));
@@ -121,13 +250,68 @@ export class DependencyDataProvider implements TreeDataProvider<ExplorerNode> {
         return element.getTreeItem();
     }
 
+    // 修改
     public async getChildren(element?: ExplorerNode): Promise<ExplorerNode[] | undefined | null> {
-        if (!await languageServerApiManager.ready()) {
-            return [];
-        }
+        languageServerApiManager.ready().then(() => {
+            if(this.isFirst) {
+                this.isFirst = false;
+                commands.executeCommand(Commands.VIEW_PACKAGE_REFRESH);
+            }
+        })
 
-        const children = (!this._rootItems || !element) ?
-            await this.getRootNodes() : await element.getChildren();
+        let children: ExplorerNode[] | null | undefined = undefined;
+        if(Settings.isHierarchicalView()) {
+            if(this.isFirst) {
+                if(!this._rootItems || !element) {
+                    children = this._rootItems = this.cacheRootItemsHierarchicalView;
+                }else {
+                    if(element instanceof HierarchicalPackageNode && element.uri) {
+                        let hierarchicalPackageNodeData = this.hierarchicalPackageNodeDataMap.get(element.uri);
+                        if(hierarchicalPackageNodeData) element.nodeData.children?.push(...hierarchicalPackageNodeData.children.filter(child => {
+                            return child.uri? fse.existsSync(Uri.parse(child.uri).fsPath) : false;
+                        }));
+                    }
+                    children = await (element as DataNode).getChildNodeList();
+                }  
+            }
+            else {
+                if (!await languageServerApiManager.ready()) {
+                    return [];
+                }
+                if(this.cacheRootItemsHierarchicalView?.length){
+                    if(!this._rootItems || !element) {
+                        children = this._rootItems = this.cacheRootItemsHierarchicalView;
+                    }else {
+                        children = await element.getChildren();
+                    }
+                }
+                else {
+                    children = (!this._rootItems || !element) ? await this.getRootNodes() : await element.getChildren();
+                }
+                if(element instanceof HierarchicalPackageNode && element.uri) {
+                    let data = <HierarchicalPackageNodeData>element.nodeData;
+                    data.children = data.children?.filter(child => {
+                        return !(child instanceof HierarchicalPackageNodeData);
+                    })
+                    this._hierarchicalPackageNodeDataMap.set(element.uri, data);
+                }
+            } 
+        }else {
+            if(this.isFirst) {
+                children = (!this._rootItems || !element) ? this._rootItems = this.cacheRootItems : await (element as DataNode).getChildNodeList();
+            }
+            else {
+                if (!await languageServerApiManager.ready()) {
+                    return [];
+                }
+                if(this.cacheRootItems?.length){
+                    children = (!this._rootItems || !element) ? this._rootItems = this.cacheRootItems : await element.getChildren();
+                }
+                else {
+                    children = (!this._rootItems || !element) ? await this.getRootNodes() : await element.getChildren();
+                }
+            }
+        }
 
         explorerNodeCache.saveNodes(children || []);
         return children;
@@ -201,5 +385,15 @@ export class DependencyDataProvider implements TreeDataProvider<ExplorerNode> {
         } finally {
             explorerLock.release();
         }
+    }
+
+    // 修改
+    public get rootItems() {
+        return this._rootItems;
+    }
+
+    // 修改
+    public get hierarchicalPackageNodeDataMap() {
+        return this._hierarchicalPackageNodeDataMap;
     }
 }

@@ -7,6 +7,9 @@ import { INodeData, NodeKind } from "../java/nodeData";
 import { explorerLock } from "../utils/Lock";
 import { ExplorerNode } from "./explorerNode";
 
+// 修改
+import * as fse from "fs-extra";
+
 export abstract class DataNode extends ExplorerNode {
 
     protected _childrenNodes: ExplorerNode[];
@@ -70,15 +73,45 @@ export abstract class DataNode extends ExplorerNode {
         return (childNode && paths.length) ? childNode.revealPaths(paths) : childNode;
     }
 
+    // 修改
     public async getChildren(): Promise<ExplorerNode[]> {
         try {
             await explorerLock.acquireAsync();
+            const data = await this.loadData();
             if (!this._nodeData.children) {
-                const data = await this.loadData();
                 this._nodeData.children = data;
-                this._childrenNodes = this.createChildNodeList() || [];
-                return this._childrenNodes;
             }
+            else {
+                let resultNodeData: INodeData[] = [];
+                if(data) {
+                    resultNodeData = data;
+                    for(let i = 0; i < this._nodeData.children.length; ++i) {
+                        let j = 0;
+                        for(; j < data.length; ++j) {
+                            if(this._nodeData.children[i].uri == data[j].uri) {
+                                resultNodeData[j] = this._nodeData.children[i];
+                                break;
+                            }
+                        }
+                        if(j >= data.length) {
+                            // 判断项目中是否还存在此节点的uri,存在则显示,不存在则删除
+                            if(fse.existsSync(Uri.parse(this._nodeData.children[i].uri).fsPath)) {
+                                resultNodeData.push(this._nodeData.children[i]);
+                            }
+                        }
+                    }
+                }
+                else {
+                    for(let i = 0; i < this._nodeData.children.length; ++i) {
+                        // 判断项目中是否还存在此节点的uri,存在则显示,不存在则删除
+                        if(fse.existsSync(Uri.parse(this._nodeData.children[i].uri).fsPath)) {
+                            resultNodeData.push(this._nodeData.children[i]);
+                        }
+                    }
+                }
+                this._nodeData.children = resultNodeData;  
+            }
+            this._childrenNodes = this.createChildNodeList() || [];
             return this._childrenNodes;
         } finally {
             explorerLock.release();
@@ -123,4 +156,15 @@ export abstract class DataNode extends ExplorerNode {
     protected abstract loadData(): Promise<any[] | undefined>;
 
     protected abstract createChildNodeList(): ExplorerNode[] | undefined;
+
+    // 修改
+    public async getChildNodeList(): Promise<ExplorerNode[]> {
+        try {
+            await explorerLock.acquireAsync();
+            this._childrenNodes = this.createChildNodeList() || [];
+            return this._childrenNodes;
+        } finally {
+            explorerLock.release();
+        }
+    }
 }

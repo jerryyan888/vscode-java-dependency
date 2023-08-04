@@ -20,7 +20,20 @@ import { DiagnosticProvider } from "./tasks/buildArtifact/migration/DiagnosticPr
 import { setContextForDeprecatedTasks, updateExportTaskType } from "./tasks/buildArtifact/migration/utils";
 import { CodeActionProvider } from "./tasks/buildArtifact/migration/CodeActionProvider";
 
+// 修改
+import * as fse from "fs-extra";
+import { INodeData } from './java/nodeData'
+import { DataNode } from "./views/dataNode";
+import { HierarchicalPackageNodeData } from "./java/hierarchicalPackageNodeData";
+
+// 修改
+let extensionContext: ExtensionContext | undefined = undefined;
 export async function activate(context: ExtensionContext): Promise<void> {
+    extensionContext = context;
+    originalActivate(extensionContext);
+}
+
+async function originalActivate(context: ExtensionContext): Promise<void> {
     contextManager.initialize(context);
     await initializeFromJsonFile(context.asAbsolutePath("./package.json"), { firstParty: true });
     await initExpService(context);
@@ -82,8 +95,59 @@ async function activateExtension(_operationId: string, context: ExtensionContext
     setContextForDeprecatedTasks();
 }
 
+
+// 修改
+function saveCache(uri: Uri, root: INodeData | INodeData[], hierarchicalPackageNodeDataMap: Map<string, HierarchicalPackageNodeData>): void {
+    if(Settings.isHierarchicalView()) {
+        let cachedFile = Uri.joinPath(uri, '.vscode/explorerNodeCached_HierarchicalView.json').fsPath;
+        if(!fse.pathExistsSync(cachedFile)) fse.createFileSync(cachedFile);
+        fse.writeFileSync(cachedFile, JSON.stringify({
+            'root': root,
+            'hierarchicalPackageNodeDataMap': Object.fromEntries(hierarchicalPackageNodeDataMap)
+        }, undefined, 4), 'utf-8');
+    }else {
+        let cachedFile = Uri.joinPath(uri, '.vscode/explorerNodeCached.json').fsPath;
+        if(!fse.pathExistsSync(cachedFile)) fse.createFileSync(cachedFile);
+        fse.writeFileSync(cachedFile, JSON.stringify(root, undefined, 4), 'utf-8');
+    }
+    
+}
+
 // this method is called when your extension is deactivated
+// 修改
 export async function deactivate(): Promise<void> {
+    if(extensionContext) {
+        let dependencyDataProvider = DependencyExplorer.getInstance(extensionContext).dataProvider;
+        if(dependencyDataProvider.rootItems){
+            let rootItems = dependencyDataProvider.rootItems;
+            const folders = workspace.workspaceFolders;
+            if (folders && folders.length) {
+                if (folders.length > 1) {
+                    folders.forEach((folder, idx) => {
+                        // let cachedFile = Uri.joinPath(folder.uri, '.vscode/explorerNodeCached.json').fsPath;
+                        // if(!fse.pathExistsSync(cachedFile)) fse.createFileSync(cachedFile);
+                        let workspaceNode = (rootItems[idx] as DataNode).nodeData;
+                        saveCache(folder.uri, workspaceNode, dependencyDataProvider.hierarchicalPackageNodeDataMap);
+                        // fse.writeFileSync(cachedFile, JSON.stringify(workspaceNode, undefined, 4), 'utf-8');
+                    })
+                }else {
+                    // let cachedFile = Uri.joinPath(folders[0].uri, '.vscode/explorerNodeCached.json').fsPath;
+                    // if(!fse.pathExistsSync(cachedFile)) fse.createFileSync(cachedFile);
+                    let projects: INodeData[] = [];
+                    rootItems.forEach(project => {
+                        let nodeData = (project as DataNode).nodeData;
+                        projects.push(nodeData);
+                    });
+                    saveCache(folders[0].uri, projects, dependencyDataProvider.hierarchicalPackageNodeDataMap);
+                    // fse.writeFileSync(cachedFile, JSON.stringify(projects, undefined, 4), 'utf-8');
+                }
+            }
+        }
+    }
+    originalDeactivate()
+}
+
+async function originalDeactivate(): Promise<void> {
     sendInfo("", EventCounter.dict);
     await disposeTelemetryWrapper();
 }
